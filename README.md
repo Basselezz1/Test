@@ -1,6 +1,14 @@
 import os, base64, zlib, random, string, tempfile, subprocess, sys
-from Cryptodome.Cipher import AES
-from Cryptodome.Util.Padding import pad, unpad
+
+# --- auto install Cryptodome if missing ---
+try:
+    from Cryptodome.Cipher import AES
+    from Cryptodome.Util.Padding import pad, unpad
+except ImportError:
+    print("[*] pycryptodome not found, installing...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pycryptodome"])
+    from Cryptodome.Cipher import AES
+    from Cryptodome.Util.Padding import pad, unpad
 
 def random_id(length=12):
     return ''.join(random.choice(string.ascii_letters) for _ in range(length))
